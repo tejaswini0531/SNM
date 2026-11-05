@@ -16,7 +16,7 @@ load_dotenv()
 app = Flask(__name__)
 app.config["SECRET_KEY"]=os.getenv("SECRET_KEY")
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=1)
-app.config['UPLOAD_FOLDER'] = 'static/uploads'
+app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'static/uploads')
 app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5MB max file size
 app.config['ALLOWED_EXTENSIONS'] = {'pdf', 'txt', 'doc', 'docx', 'png', 'jpg', 'jpeg'}
 
@@ -28,7 +28,7 @@ DB_CONFIG = {
     "port":os.getenv("DB_PORT"),
     "user":os.getenv("DB_USER"),
     "password":os.getenv("DB_PASSWORD"),
-    "database":os.getenv("DB_NAME")
+    "database":os.getenv("DB_NAME"),
 }
 
 EMAIL_CONFIG = {
@@ -44,11 +44,20 @@ EMAIL_CONFIG = {
 def check_database_exists():
     """Check if database exists, create if not"""
     try:
-        conn = connect(
-            host=DB_CONFIG['host'],
-            user=DB_CONFIG['user'],
-            password=DB_CONFIG['password']
-        )
+        # Connect without database to check/create it
+        conn_config = {
+            "host": DB_CONFIG['host'],
+            "port": DB_CONFIG['port'],
+            "user": DB_CONFIG['user'],
+            "password": DB_CONFIG['password']
+        }
+        # Add SSL settings if present
+        if DB_CONFIG.get('ssl_disabled') is False:
+            conn_config['ssl_ca'] = DB_CONFIG.get('ssl_ca')
+            conn_config['ssl_verify_cert'] = DB_CONFIG.get('ssl_verify_cert')
+            conn_config['ssl_verify_identity'] = DB_CONFIG.get('ssl_verify_identity')
+        
+        conn = connect(**conn_config)
         cursor = conn.cursor()
         
         # Create database if not exists
@@ -345,7 +354,7 @@ def verify_otp():
             cursor.execute("SELECT email from users where email=%s and otp=%s",(email,otp))
             user = cursor.fetchone()
             if user:
-                cursor.execute("UPDATE USERS SET is_active = 1, otp=NULL where email=%s",(email,))
+                cursor.execute("UPDATE users SET is_active = 1, otp=NULL where email=%s",(email,))
                 session.pop('pending_email')
                 conn.commit()
                 cursor.close()
@@ -373,7 +382,7 @@ def resend_otp():
         cursor = conn.cursor(dictionary=True)
 
         otp = generate_otp()
-        cursor.execute("UPDATE USERS SET otp=%s where email=%s",(otp,email))
+        cursor.execute("UPDATE users SET otp=%s where email=%s",(otp,email))
         conn.commit()
 
         email_body = f"""
@@ -916,9 +925,12 @@ if __name__ == '__main__':
     # Initialize database before starting the app
     if init_database():
         print("Starting Flask application...")
-        print("Access the app at: http://127.0.0.1:5000")
+        # Use PORT env variable for deployment platforms, default to 5000
+        port = int(os.getenv('PORT', 5000))
+        debug_mode = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+        print(f"Access the app at: http://0.0.0.0:{port}")
         print("-"*50)
-        app.run(debug=True, port=5000)
+        app.run(debug=debug_mode, host='0.0.0.0', port=port)
     else:
         print("\n" + "!"*50)
         print("Application could not start due to database errors.")
